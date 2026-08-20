@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Environment variables / secrets
+.env
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS junk
+.DS_Store
+
+# Editor/IDE files, if you don't want project settings committed
+.vscode/
+.idea/
