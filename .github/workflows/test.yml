@@ -24,5 +24,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check Mongo secret
+        run: |
+          if [ -z "$MONGODB_URI" ]; then
+            echo "MONGODB_URI is missing"
+            exit 1
+          else
+            echo "MONGODB_URI is set"
+          fi
+
       - name: Run Jest tests
         run: npm test
