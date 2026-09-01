@@ -1,8 +1,7 @@
 {
-  "name": "test-school-api",
+  "name": "k12info-serverless-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "AWS Lambda and API Gateway backend for K12Info",
   "scripts": {
     "test": "jest"
   },
@@ -11,13 +10,15 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@aws-sdk/client-apigatewaymanagementapi": "^3.1121.0",
+    "@aws-sdk/client-dynamodb": "^3.1121.0",
+    "@aws-sdk/client-ssm": "^3.1121.0",
+    "@aws-sdk/lib-dynamodb": "^3.1121.0",
+    "aws-jwt-verify": "^5.2.1",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1",
-    "mongodb": "^7.5.0",
-    "swagger-ui-express": "^5.0.1"
+    "mongodb": "^7.5.0"
   },
   "devDependencies": {
-    "jest": "^30.4.2",
-    "supertest": "^7.2.2"
+    "jest": "^30.4.2"
   }
 }

@@ -1,0 +1,659 @@
+openapi: 3.0.3
+info:
+  title: K12Info HTTP API
+  version: 1.0.0
+  description: |
+    Production HTTP routes implemented by the grouped K12Info Lambda handlers.
+    API Gateway WebSocket routes and messages are intentionally not represented
+    as REST operations; only the HTTP ticket endpoint appears here.
+servers:
+  - url: /
+    description: Current API Gateway origin
+tags:
+  - name: Schools
+  - name: Search
+  - name: Users
+  - name: Comments
+  - name: WebSocket authentication
+
+paths:
+  /api/schools/{sector}/{id}:
+    get:
+      tags: [Schools]
+      summary: Get a school
+      operationId: getSchool
+      parameters:
+        - $ref: '#/components/parameters/Sector'
+        - $ref: '#/components/parameters/SchoolId'
+      responses:
+        '200':
+          description: School record with its sector
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/School'
+        '400':
+          $ref: '#/components/responses/InvalidSector'
+        '404':
+          description: School not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/schools/{sector}/{id}/details:
+    get:
+      tags: [Schools]
+      summary: Get public-school CRDC details
+      description: Detailed teacher/staff and discipline data is available only for public schools.
+      operationId: getSchoolDetails
+      parameters:
+        - $ref: '#/components/parameters/Sector'
+        - $ref: '#/components/parameters/SchoolId'
+      responses:
+        '200':
+          description: Detail records; either value may be null when no matching MongoDB document exists.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [teachersStaff, discipline]
+                properties:
+                  teachersStaff:
+                    nullable: true
+                    type: object
+                    additionalProperties: true
+                  discipline:
+                    nullable: true
+                    type: object
+                    additionalProperties: true
+        '400':
+          description: The requested sector is not public.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/search:
+    get:
+      tags: [Search]
+      summary: Search schools and locations
+      operationId: search
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search text. Whitespace-only values are rejected.
+          schema: { type: string, minLength: 1 }
+        - name: type
+          in: query
+          required: false
+          description: Result group to continue. Must be supplied together with `after`.
+          schema:
+            type: string
+            enum: [public, private, location]
+        - name: after
+          in: query
+          required: false
+          description: Opaque Atlas Search sequence token. Must be supplied together with `type`.
+          schema: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: Initial combined results or one continued result group.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          description: Missing query or invalid pagination parameters.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/locations/{id}/schools:
+    get:
+      tags: [Search]
+      summary: List schools in a state or city
+      operationId: getLocationSchools
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Location identifier in `state:<state>` or `city:<state>:<city>` form.
+          schema:
+            type: string
+            pattern: '^(state:[^:]+|city:[^:]+:[^:]+)$'
+      responses:
+        '200':
+          description: Public and private schools matching the location.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchoolGroups'
+        '400':
+          description: Invalid location identifier.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/map-search:
+    get:
+      tags: [Search]
+      summary: List schools within map bounds
+      operationId: mapSearch
+      parameters:
+        - $ref: '#/components/parameters/North'
+        - $ref: '#/components/parameters/South'
+        - $ref: '#/components/parameters/East'
+        - $ref: '#/components/parameters/West'
+      responses:
+        '200':
+          description: Public and private schools inside the supplied polygon.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchoolGroups'
+        '400':
+          description: Missing, non-numeric, out-of-range, or inverted bounds.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/users:
+    post:
+      tags: [Users]
+      summary: Create the authenticated user's MongoDB profile
+      operationId: createUserProfile
+      security:
+        - cognitoBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsernameRequest'
+      responses:
+        '201':
+          description: User profile created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message, user]
+                properties:
+                  message: { type: string }
+                  user: { $ref: '#/components/schemas/UserProfile' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Account or normalized username already has a profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/users/username-available:
+    get:
+      tags: [Users]
+      summary: Check normalized username availability
+      operationId: usernameAvailable
+      parameters:
+        - name: username
+          in: query
+          required: true
+          schema: { $ref: '#/components/schemas/Username' }
+      responses:
+        '200':
+          description: Availability result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available]
+                properties:
+                  available: { type: boolean }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/users/me:
+    get:
+      tags: [Users]
+      summary: Get the authenticated user's MongoDB profile
+      operationId: getCurrentUser
+      security:
+        - cognitoBearer: []
+      responses:
+        '200':
+          description: Current user profile.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: '#/components/schemas/UserProfile' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No MongoDB profile exists for the authenticated Cognito subject.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [Users]
+      summary: Update the authenticated user's username
+      operationId: updateCurrentUser
+      security:
+        - cognitoBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsernameRequest'
+      responses:
+        '200':
+          description: Updated profile.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: '#/components/schemas/UserProfile' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: User profile not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Username is already taken.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/schools/{sector}/{id}/comments:
+    get:
+      tags: [Comments]
+      summary: Get a page of school comments
+      description: Authentication is optional and only affects each comment's `is_owner` value.
+      operationId: getSchoolComments
+      security:
+        - cognitoBearer: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/Sector'
+        - $ref: '#/components/parameters/SchoolId'
+        - $ref: '#/components/parameters/BeforeCursor'
+      responses:
+        '200':
+          description: Newest-first page of comments.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommentPage' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: School not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Comments]
+      summary: Create a school comment
+      description: Requires both a valid Cognito access token and an existing MongoDB user profile.
+      operationId: createComment
+      security:
+        - cognitoBearer: []
+      parameters:
+        - $ref: '#/components/parameters/Sector'
+        - $ref: '#/components/parameters/SchoolId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: Comment persisted; realtime delivery remains best effort.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message, comment]
+                properties:
+                  message: { type: string }
+                  comment: { $ref: '#/components/schemas/Comment' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Authenticated Cognito subject no longer has a MongoDB profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: School not found.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/comments/{id}:
+    delete:
+      tags: [Comments]
+      summary: Delete an owned comment
+      operationId: deleteComment
+      security:
+        - cognitoBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: MongoDB ObjectId of the comment.
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{24}$'
+      responses:
+        '200':
+          description: Comment deleted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Authenticated Cognito subject no longer has a MongoDB profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404':
+          description: Comment not found or not owned by the authenticated user.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/users/me/comments:
+    get:
+      tags: [Comments]
+      summary: Get the authenticated user's comments
+      operationId: getCurrentUserComments
+      security:
+        - cognitoBearer: []
+      parameters:
+        - $ref: '#/components/parameters/BeforeCursor'
+      responses:
+        '200':
+          description: Newest-first page enriched with school names.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommentPage' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/websocket-ticket:
+    post:
+      tags: [WebSocket authentication]
+      summary: Create a single-use WebSocket authentication ticket
+      description: The ticket expires after 60 seconds. Cognito tokens are not passed to the WebSocket connection.
+      operationId: createWebSocketTicket
+      security:
+        - cognitoBearer: []
+      responses:
+        '200':
+          description: Ticket stored for one authenticated WebSocket connection.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ticket]
+                properties:
+                  ticket:
+                    type: string
+                    description: Random 32-byte base64url value.
+                    pattern: '^[A-Za-z0-9_-]{43}$'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    cognitoBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Amazon Cognito access token verified for the configured user pool and application client.
+
+  parameters:
+    Sector:
+      name: sector
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [public, private]
+    SchoolId:
+      name: id
+      in: path
+      required: true
+      description: Base school MongoDB `_id`; it is not necessarily a public-school NCES identifier.
+      schema: { type: string, minLength: 1 }
+    BeforeCursor:
+      name: before
+      in: query
+      required: false
+      description: Opaque base64url cursor encoding the last comment's `created_at` and `_id` compound sort key.
+      schema: { type: string, minLength: 1 }
+    North:
+      name: north
+      in: query
+      required: true
+      schema: { type: number, minimum: -90, maximum: 90 }
+    South:
+      name: south
+      in: query
+      required: true
+      schema: { type: number, minimum: -90, maximum: 90 }
+    East:
+      name: east
+      in: query
+      required: true
+      schema: { type: number, minimum: -180, maximum: 180 }
+    West:
+      name: west
+      in: query
+      required: true
+      schema: { type: number, minimum: -180, maximum: 180 }
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters or body.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidSector:
+      description: School sector is not `public` or `private`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing, malformed, invalid, or expired Cognito access token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InternalError:
+      description: Backend operation failed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+    Message:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+    Username:
+      type: string
+      minLength: 3
+      maxLength: 20
+      pattern: '^[a-zA-Z0-9_]+$'
+    UsernameRequest:
+      type: object
+      required: [username]
+      properties:
+        username: { $ref: '#/components/schemas/Username' }
+    UserProfile:
+      type: object
+      required: [cognito_sub, username, username_normalized]
+      properties:
+        _id:
+          description: MongoDB identifier; serialized according to the driver response.
+        cognito_sub: { type: string }
+        username: { type: string }
+        username_normalized: { type: string }
+        created_at: { type: string, format: date-time }
+      additionalProperties: true
+    School:
+      type: object
+      required: [_id, sector]
+      properties:
+        _id: { type: string }
+        school_name: { type: string }
+        sector:
+          type: string
+          enum: [public, private]
+        address:
+          type: object
+          additionalProperties: true
+        location:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+    SearchSchool:
+      allOf:
+        - $ref: '#/components/schemas/School'
+        - type: object
+          properties:
+            score: { type: number }
+            paginationToken:
+              type: string
+              description: Opaque Atlas Search sequence token.
+    Location:
+      type: object
+      properties:
+        _id: { type: string }
+        type: { type: string, enum: [city, state] }
+        label: { type: string }
+        city: { type: string }
+        state: { type: string }
+        state_name: { type: string }
+        score: { type: number }
+        paginationToken: { type: string }
+      additionalProperties: true
+    SearchPagination:
+      type: object
+      properties:
+        publicAfter: { type: string }
+        privateAfter: { type: string }
+        locationAfter: { type: string }
+        publicHasMore: { type: boolean }
+        privateHasMore: { type: boolean }
+        locationHasMore: { type: boolean }
+    SearchResponse:
+      type: object
+      required: [pagination]
+      properties:
+        schools:
+          type: array
+          items: { $ref: '#/components/schemas/SearchSchool' }
+        locations:
+          type: array
+          items: { $ref: '#/components/schemas/Location' }
+        pagination: { $ref: '#/components/schemas/SearchPagination' }
+    SchoolGroups:
+      type: object
+      required: [publicResults, privateResults]
+      properties:
+        publicResults:
+          type: array
+          items: { $ref: '#/components/schemas/School' }
+        privateResults:
+          type: array
+          items: { $ref: '#/components/schemas/School' }
+    CommentAuthor:
+      type: object
+      properties:
+        username: { type: string }
+    Comment:
+      type: object
+      required: [_id, school_id, sector, text, created_at, updated_at]
+      properties:
+        _id:
+          description: MongoDB ObjectId serialized by the Lambda JSON response.
+        school_id: { type: string }
+        school_name: { type: string }
+        sector:
+          type: string
+          enum: [public, private]
+        text: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        author: { $ref: '#/components/schemas/CommentAuthor' }
+        is_owner: { type: boolean }
+      additionalProperties: true
+    CommentPage:
+      type: object
+      required: [comments, hasMore, nextCursor]
+      properties:
+        comments:
+          type: array
+          items: { $ref: '#/components/schemas/Comment' }
+        hasMore: { type: boolean }
+        nextCursor:
+          type: string
+          nullable: true
+          description: Opaque cursor for the next `before` request; null when no continuation exists.

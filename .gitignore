@@ -8,9 +8,16 @@ node_modules/
 *.log
 npm-debug.log*
 
+# Lambda deployment artifacts and local staging directories
+*.zip
+deploy-*/
+
+# Test and coverage output
+coverage/
+
 # OS junk
 .DS_Store
 
-# Editor/IDE files, if you don't want project settings committed
+# Editor/IDE files
 .vscode/
 .idea/
